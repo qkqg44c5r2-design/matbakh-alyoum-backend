@@ -1,87 +1,88 @@
-/**
- * Matbakh Alyoum – WhatsApp → Google Sheets Webhook
- * READY FOR PRODUCTION
- */
-
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const bodyParser = require("body-parser");
-const axios = require("axios");
+const { Pool } = require("pg");
 
+// =========================
+// App & Middleware
+// =========================
 const app = express();
 
 app.use(helmet());
-app.use(cors());
-app.use(bodyParser.json({ limit: "10mb" }));
+app.use(cors({ origin: true }));
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-/* =========================
-   Health Check
-========================= */
-app.get("/health", (req, res) => {
-  res.json({
+// =========================
+// Environment
+// =========================
+const PORT = process.env.PORT || 3000;
+
+if (!process.env.DATABASE_URL) {
+  console.error("❌ DATABASE_URL is missing");
+  process.exit(1);
+}
+
+// =========================
+// PostgreSQL Connection
+// =========================
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : false,
+});
+
+pool.connect()
+  .then(() => console.log("✅ PostgreSQL connected"))
+  .catch(err => {
+    console.error("❌ PostgreSQL connection error:", err);
+    process.exit(1);
+  });
+
+// =========================
+// Health Check (Railway)
+// =========================
+app.get("/", (req, res) => {
+  res.status(200).json({
     status: "ok",
-    timestamp: new Date().toISOString()
+    service: "matbakh-alyoum-backend",
+    environment: process.env.NODE_ENV || "development"
   });
 });
 
-/* =========================
-   WhatsApp Webhook (VERIFY)
-========================= */
-app.get("/webhooks/whatsapp", (req, res) => {
-  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
-
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-
-  return res.sendStatus(403);
-});
-
-/* =========================
-   WhatsApp Webhook (POST)
-========================= */
-app.post("/webhooks/whatsapp", async (req, res) => {
+// =========================
+// Example API Route
+// =========================
+app.get("/api/ping", async (req, res) => {
   try {
-    const entry = req.body.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-    const message = value?.messages?.[0];
-
-    if (!message) {
-      return res.sendStatus(200);
-    }
-
-    const from = message.from || "";
-    const text = message.text?.body || "";
-    const timestamp = new Date(
-      parseInt(message.timestamp, 10) * 1000
-    ).toISOString();
-
-    // Send to Google Sheets
-    if (process.env.SHEETS_WEBHOOK_URL) {
-      await axios.post(process.env.SHEETS_WEBHOOK_URL, {
-        phone: from,
-        message: text,
-        received_at: timestamp
-      });
-    }
-
-    return res.sendStatus(200);
+    const result = await pool.query("SELECT NOW()");
+    res.json({
+      success: true,
+      time: result.rows[0].now
+    });
   } catch (error) {
-    console.error("Webhook Error:", error.message);
-    return res.sendStatus(200);
+    console.error(error);
+    res.status(500).json({ success: false });
   }
 });
 
-/* =========================
-   Start Server
-========================= */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+// =========================
+// Global Error Handler
+// =========================
+process.on("unhandledRejection", err => {
+  console.error("❌ Unhandled Rejection:", err);
+});
+
+process.on("uncaughtException", err => {
+  console.error("❌ Uncaught Exception:", err);
+  process.exit(1);
+});
+
+// =========================
+// Start Server
+// =========================
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
