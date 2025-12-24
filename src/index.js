@@ -5,7 +5,7 @@ const bodyParser = require("body-parser");
 const { Pool } = require("pg");
 
 // =========================
-// App & Middleware
+// App Initialization
 // =========================
 const app = express();
 
@@ -29,53 +29,60 @@ if (!process.env.DATABASE_URL) {
 // =========================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl:
+    process.env.NODE_ENV === "production"
+      ? { rejectUnauthorized: false }
+      : false,
 });
 
-pool.connect()
+pool
+  .connect()
   .then(() => console.log("✅ PostgreSQL connected"))
-  .catch(err => {
+  .catch((err) => {
     console.error("❌ PostgreSQL connection error:", err);
     process.exit(1);
   });
 
 // =========================
-// Health Check (Railway)
+// Routes
 // =========================
+
+// Root – basic check
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "ok",
     service: "matbakh-alyoum-backend",
-    environment: process.env.NODE_ENV || "development"
+    environment: process.env.NODE_ENV || "development",
   });
 });
 
-// =========================
-// Example API Route
-// =========================
+// Healthcheck – REQUIRED for Railway
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
+
+// Test DB connection
 app.get("/api/ping", async (req, res) => {
   try {
     const result = await pool.query("SELECT NOW()");
     res.json({
       success: true,
-      time: result.rows[0].now
+      time: result.rows[0].now,
     });
   } catch (error) {
-    console.error(error);
+    console.error("❌ DB query error:", error);
     res.status(500).json({ success: false });
   }
 });
 
 // =========================
-// Global Error Handler
+// Global Error Protection
 // =========================
-process.on("unhandledRejection", err => {
+process.on("unhandledRejection", (err) => {
   console.error("❌ Unhandled Rejection:", err);
 });
 
-process.on("uncaughtException", err => {
+process.on("uncaughtException", (err) => {
   console.error("❌ Uncaught Exception:", err);
   process.exit(1);
 });
